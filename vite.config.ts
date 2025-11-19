@@ -11,7 +11,8 @@ export default defineConfig(({ mode }) => {
     define: {
       // Strict rule: Code must access process.env.API_KEY.
       // We map VITE_GEMINI_API_KEY (from .env or Vercel Dashboard) to it.
-      'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
+      // Use safety check for undefined to prevent build errors if key is missing locally
+      'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY || ''),
     },
   };
 });

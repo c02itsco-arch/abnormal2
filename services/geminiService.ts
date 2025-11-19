@@ -11,10 +11,15 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
  */
 const cleanJsonString = (text: string): string => {
   let clean = text.trim();
+  // Remove opening ```json or ```
   if (clean.startsWith('```json')) {
-    clean = clean.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    clean = clean.replace(/^```json\s*/, '');
   } else if (clean.startsWith('```')) {
-    clean = clean.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    clean = clean.replace(/^```\s*/, '');
+  }
+  // Remove closing ```
+  if (clean.endsWith('```')) {
+    clean = clean.replace(/\s*```$/, '');
   }
   return clean;
 };
@@ -30,7 +35,8 @@ export const analyzeAnomalies = async (data: Transaction[]): Promise<AnalysisRes
 
     // Prepare a subset of data to ensure we don't exceed token limits for the demo
     // We sanitize the data to only include relevant fields for analysis
-    const sampleData = data.slice(0, 800).map(t => ({
+    // Limit to 500 transactions to be safe with token limits on free tier/flash models
+    const sampleData = data.slice(0, 500).map(t => ({
       id: t.id,
       actCode: t.actCode,
       monthly: t.monthly,
