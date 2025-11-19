@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Anomaly Detector",
+  "description": "A React application utilizing Google Gemini API to analyze financial CSV data, identifying and visualizing anomalous transaction amounts with interactive charts.",
+  "requestFramePermissions": []
+}
