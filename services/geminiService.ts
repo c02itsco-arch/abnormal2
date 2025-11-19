@@ -2,20 +2,35 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, Transaction } from "../types";
 
 // Initialize Gemini with the strictly required process.env.API_KEY
+// This variable is injected by Vite at build time via vite.config.ts
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
+ * Helper to strip Markdown code blocks from the response text
+ * e.g. ```json { ... } ``` -> { ... }
+ */
+const cleanJsonString = (text: string): string => {
+  let clean = text.trim();
+  if (clean.startsWith('```json')) {
+    clean = clean.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (clean.startsWith('```')) {
+    clean = clean.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  return clean;
+};
+
+/**
  * Sends transaction data to Gemini to identify anomalies.
- * We limit the context to prevent token overflow for large CSVs in this demo.
  */
 export const analyzeAnomalies = async (data: Transaction[]): Promise<AnalysisResult> => {
   try {
     // Model selection based on task complexity (Data Analysis)
+    // Using 'gemini-2.5-flash' as requested for general text/analysis tasks
     const modelName = 'gemini-2.5-flash';
 
     // Prepare a subset of data to ensure we don't exceed token limits for the demo
-    // In a production app, we might aggregate or batch this.
-    const sampleData = data.slice(0, 700).map(t => ({
+    // We sanitize the data to only include relevant fields for analysis
+    const sampleData = data.slice(0, 800).map(t => ({
       id: t.id,
       actCode: t.actCode,
       monthly: t.monthly,
@@ -23,19 +38,14 @@ export const analyzeAnomalies = async (data: Transaction[]): Promise<AnalysisRes
     }));
 
     const prompt = `
-      Analyze the provided financial transaction JSON data.
-      Your task is to detect anomalies in the 'amount' field.
+      Analyze the provided financial transaction JSON data to detect anomalies in the 'amount' field.
       
-      Look for:
-      1. Outliers: Amounts that are significantly higher or lower than the average for the same 'actCode'.
-      2. Irregularities: Unusual spikes based on 'monthly' trends.
+      Rules:
+      1. Identify **Outliers**: Amounts significantly deviating from the norm for a specific 'actCode'.
+      2. Identify **Irregularities**: Unusual patterns or spikes across 'monthly' periods.
+      3. Focus on the top 10 most significant anomalies.
       
-      Return a JSON object containing:
-      - "anomalies": An array of the top 10 most suspicious transactions. Each item must have:
-        - "transactionId": The exact 'id' from the input.
-        - "reason": A short, clear explanation of why it is anomalous (e.g., "Amount is 10x higher than average for actCode 41039160").
-        - "severity": "HIGH", "MEDIUM", or "LOW".
-      - "summary": A brief paragraph summarizing the overall data quality and key findings.
+      Return the response strictly as a JSON object adhering to the schema.
     `;
 
     const response = await ai.models.generateContent({
@@ -51,14 +61,14 @@ export const analyzeAnomalies = async (data: Transaction[]): Promise<AnalysisRes
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  transactionId: { type: Type.NUMBER },
-                  reason: { type: Type.STRING },
+                  transactionId: { type: Type.NUMBER, description: "The original id from input" },
+                  reason: { type: Type.STRING, description: "Explanation of why this is anomalous" },
                   severity: { type: Type.STRING, enum: ["HIGH", "MEDIUM", "LOW"] },
                 },
                 required: ["transactionId", "reason", "severity"],
               },
             },
-            summary: { type: Type.STRING },
+            summary: { type: Type.STRING, description: "Executive summary of the findings" },
           },
           required: ["anomalies", "summary"],
         },
@@ -67,14 +77,20 @@ export const analyzeAnomalies = async (data: Transaction[]): Promise<AnalysisRes
 
     const resultText = response.text;
     if (!resultText) {
-      throw new Error("No response from Gemini.");
+      throw new Error("Gemini returned an empty response.");
     }
 
-    const parsed = JSON.parse(resultText) as AnalysisResult;
+    // Clean markdown syntax if present before parsing
+    const cleanedJson = cleanJsonString(resultText);
+    const parsed = JSON.parse(cleanedJson) as AnalysisResult;
     return parsed;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Analysis Error:", error);
-    throw new Error("Failed to analyze data with Gemini. Please check your API Key and try again.");
+    // Handle potential API key issues or quota limits
+    if (error.message?.includes('403') || error.message?.includes('API key')) {
+        throw new Error("Invalid or missing API Key. Please check your Vercel environment variables.");
+    }
+    throw new Error("Failed to analyze data. " + (error.message || "Unknown error"));
   }
 };
